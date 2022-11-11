@@ -1,5 +1,6 @@
 ﻿using MathNet.Numerics;
 using NUnit.Framework;
+using System.Diagnostics;
 
 namespace CancellationTokensMemLeakRepro;
 
@@ -21,7 +22,7 @@ public class Tests
         {
             yield return new FrameworkLinkedCancellationTokenProvider();
             yield return new CustomLinkedCancellationTokenProvider();
-            yield return new CustomNoRegistrationLinkedCancellationTokenProvider();
+            //yield return new CustomNoRegistrationLinkedCancellationTokenProvider();
         }
     }
 
@@ -31,7 +32,8 @@ public class Tests
     [NonParallelizable]
     public async Task Test(
         [ValueSource(nameof(TimeoutTokenProviders))] ITimeoutCancellationTokenProvider timeoutCancellationTokenProvider,
-        [ValueSource(nameof(LinkedTokenProviders))] ILinkedCancellationTokenProvider linkedCancellationTokenProvider)
+        [ValueSource(nameof(LinkedTokenProviders))] ILinkedCancellationTokenProvider linkedCancellationTokenProvider,
+        [Values] bool diposeSource)
     {
         var testCts = new CancellationTokenSource();
         testCts.CancelAfter(TestDuration);
@@ -47,55 +49,71 @@ public class Tests
             memoryUsageMeasurement.Add(bytes);
         }, null, TimeSpan.FromSeconds(5) /* let it warmup a bit */, TimeSpan.FromSeconds(1));
 
-        await Task.WhenAll(Enumerable.Range(0, 1000)
-            .Select(i => RunManyAsync(timeoutCancellationTokenProvider, linkedCancellationTokenProvider, testCts.Token)));
+        var iterations = await Task.WhenAll(Enumerable.Range(0, 1000)
+            .Select(i => RunAsync(timeoutCancellationTokenProvider, linkedCancellationTokenProvider, diposeSource, testCts.Token)));
 
         // Calculate memory increase per second using slope from line fitting
         (_, double slope) = Fit.Line(Enumerable.Range(0, memoryUsageMeasurement.Count).Select(i => (double)i).ToArray(), memoryUsageMeasurement.ToArray());
         
         Console.WriteLine($"Memory increase per second: {slope} bytes");
+        Console.WriteLine($"Iterations: {iterations.Sum()}");
         
         // Above some threshold, we can assume there is a memory leak
-        Assert.Less(slope, 1_000_000, $"Probably leaking");
+        Assert.Less(slope, 100_000, $"Probably leaking");
         
         GC.KeepAlive(timer);
     }
 
-    private async Task RunManyAsync(
+    private async Task<int> RunAsync(
         ITimeoutCancellationTokenProvider timeoutTp,
         ILinkedCancellationTokenProvider linkedTp,
+        bool disposeSource,
         CancellationToken token)
     {
+        var random = new Random(0);
+        int iterations = 0;
+
         while (!token.IsCancellationRequested)
         {
+            var token2 = timeoutTp.GetCancellationToken(TimeSpan.FromMilliseconds(random.Next(1, 500)));
+
+            var subTasktokenCts = linkedTp.GetLinkedCancellationTokenSource(token, token2);
+            var subTasktoken = subTasktokenCts.Token;
+
+            Interlocked.Increment(ref iterations);
+
             try
             {
-                var token2 = timeoutTp.GetCancellationToken(TimeSpan.FromMilliseconds(Random.Shared.Next(1, 5000)));
-                var subTasktoken = linkedTp.GetLinkedCancellationToken(token, token2);
-                
-                await RunAsync(timeoutTp, linkedTp, subTasktoken);
+                await Task.Delay(TimeSpan.FromDays(1), subTasktoken);
             }
             catch (OperationCanceledException)
             {
                 
             }
+            finally
+            {
+                if (disposeSource)
+                    subTasktokenCts.Dispose();
+            }
         }
+
+        return iterations;
     }
 
-    private async Task RunAsync(
-        ITimeoutCancellationTokenProvider timeoutTp,
-        ILinkedCancellationTokenProvider linkedTp,
-        CancellationToken token)
+    [Test]
+    [Timeout(5000)]
+    public async Task LinkedTokenProviderWorksProperly([ValueSource(nameof(LinkedTokenProviders))] ILinkedCancellationTokenProvider linkedCancellationTokenProvider)
     {
-        // Probablity to fork task and token
-        if (Random.Shared.NextDouble() > 0.05)
-        {
-            var token2 = timeoutTp.GetCancellationToken(TimeSpan.FromMilliseconds(Random.Shared.Next(1, 5000)));
-            token = linkedTp.GetLinkedCancellationToken(token, token2);
+        var cts = linkedCancellationTokenProvider.GetLinkedCancellationTokenSource(new CancellationTokenSource(1000).Token, new CancellationTokenSource(3000).Token);
+        var token = cts.Token;
 
-            await RunAsync(timeoutTp, linkedTp, token);
+        var sw = Stopwatch.StartNew();
+        token.Register(() => sw.Stop());
+
+        while (!token.IsCancellationRequested) {
+            await Task.Delay(100);
         }
-        
-        await Task.Delay(Random.Shared.Next(1, 1000), token);
+
+        Assert.That(sw.ElapsedMilliseconds, Is.EqualTo(1000).Within(100));
     }
 }

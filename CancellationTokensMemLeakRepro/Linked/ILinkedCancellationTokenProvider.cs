@@ -1,4 +1,4 @@
 public interface ILinkedCancellationTokenProvider
 {
-    CancellationToken GetLinkedCancellationToken(CancellationToken token1, CancellationToken token2);
+    CancellationTokenSource GetLinkedCancellationTokenSource(CancellationToken token1, CancellationToken token2);
 }

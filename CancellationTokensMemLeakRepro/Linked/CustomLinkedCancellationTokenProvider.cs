@@ -1,35 +1,29 @@
 public class CustomLinkedCancellationTokenProvider : ILinkedCancellationTokenProvider
 {
-    public CancellationToken GetLinkedCancellationToken(CancellationToken token1, CancellationToken token2)
+    public CancellationTokenSource GetLinkedCancellationTokenSource(CancellationToken token1, CancellationToken token2)
     {
-        return new LinkedCancellationTokenSource(token1, token2).Token;
+        return new LinkedCancellationTokenSource(token1, token2);
     }
 }
 
 public class LinkedCancellationTokenSource : CancellationTokenSource
 {
-    private readonly CancellationTokenRegistration? reg1;
-    private readonly CancellationTokenRegistration? reg2;
+    private readonly CancellationTokenRegistration? _registration1;
+    private readonly CancellationTokenRegistration? _registration2;
             
     public LinkedCancellationTokenSource(CancellationToken token1, CancellationToken token2)
     {
         if (token1.CanBeCanceled)
-            reg1 = token1.Register(Cancel);
+            _registration1 = token1.Register(CancelAndUnregister);
                 
         if (token2.CanBeCanceled)
-            reg2 = token2.Register(Cancel);
+            _registration2 = token2.Register(CancelAndUnregister);
     }
 
-    protected override void Dispose(bool disposing)
+    private void CancelAndUnregister()
     {
-        reg1?.Dispose();
-        reg2?.Dispose();
-                
-        base.Dispose(disposing);
-    }
-
-    ~LinkedCancellationTokenSource()
-    {
-        Dispose(true);
+        Cancel();
+        _registration1?.Unregister();
+        _registration2?.Unregister();
     }
 }

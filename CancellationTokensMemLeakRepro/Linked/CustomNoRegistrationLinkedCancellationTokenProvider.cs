@@ -1,8 +1,8 @@
 public class CustomNoRegistrationLinkedCancellationTokenProvider : ILinkedCancellationTokenProvider
 {
-    public CancellationToken GetLinkedCancellationToken(CancellationToken token1, CancellationToken token2)
+    public CancellationTokenSource GetLinkedCancellationTokenSource(CancellationToken token1, CancellationToken token2)
     {
-        return new LinkedCancellationTokenSourceNoRegistration(token1, token2).Token;
+        return new LinkedCancellationTokenSourceNoRegistration(token1, token2);
     }
 }
 

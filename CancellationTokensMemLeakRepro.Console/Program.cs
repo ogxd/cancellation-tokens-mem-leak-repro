@@ -5,8 +5,8 @@ using CancellationTokensMemLeakRepro;
 Console.WriteLine("Start");
 
 var tests = new Tests();
-tests.TestDuration = TimeSpan.FromSeconds(20);
+tests.TestDuration = TimeSpan.FromSeconds(10000);
 
-await tests.Test(new CoalescingTimeoutCancellationTokenProvider(), new FrameworkLinkedCancellationTokenProvider());
+await tests.Test(new CoalescingTimeoutCancellationTokenProvider(), new CustomLinkedCancellationTokenProvider(), true);
 
 Console.WriteLine("Finished");
